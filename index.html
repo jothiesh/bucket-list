@@ -8,21 +8,25 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html, body { margin:0; padding:0; min-height:100%; }
-  body { background:#fcf6f0; }
-  #root { min-height:100vh; }
-  @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
-  @keyframes checkPop { 0%{transform:scale(.5);opacity:0} 60%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
-  @keyframes confetti { to { transform: translateY(120vh) rotate(720deg); opacity:0; } }
-  @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
-  @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
-  button { font-family:inherit; transition:transform .15s ease, background .2s ease, box-shadow .2s ease; cursor:pointer; }
-  button:active { transform:scale(0.96); }
-  input { font-family:inherit; }
-  input::placeholder { color: rgba(0,0,0,0.3); }
-  .row:hover { background: rgba(255,255,255,0.95) !important; }
-  .skeleton { background:linear-gradient(90deg,#f0e3da 25%,#f7eee7 37%,#f0e3da 63%); background-size:200% 100%; animation:shimmer 1.4s infinite; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;min-height:100%}
+  body{background:#fcf6f0}
+  #root{min-height:100vh}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes checkPop{0%{transform:scale(.5);opacity:0}60%{transform:scale(1.2)}100%{transform:scale(1);opacity:1}}
+  @keyframes confetti{to{transform:translateY(120vh) rotate(720deg);opacity:0}}
+  @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+  @keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+  @keyframes modalIn{from{opacity:0;transform:translateY(20px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+  @keyframes ringGrow{from{stroke-dashoffset:var(--circ)}to{stroke-dashoffset:var(--off)}}
+  button{font-family:inherit;transition:transform .15s ease,background .2s ease,box-shadow .2s ease;cursor:pointer}
+  button:active{transform:scale(.96)}
+  input,textarea,select{font-family:inherit}
+  input::placeholder,textarea::placeholder{color:rgba(0,0,0,.3)}
+  .row:hover{background:rgba(255,255,255,.97)!important}
+  .skeleton{background:linear-gradient(90deg,#f0e3da 25%,#f7eee7 37%,#f0e3da 63%);background-size:200% 100%;animation:shimmer 1.4s infinite}
+  ::-webkit-scrollbar{width:8px}
+  ::-webkit-scrollbar-thumb{background:rgba(180,120,90,.25);border-radius:4px}
 </style>
 </head>
 <body>
@@ -33,159 +37,508 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
+/* ============================================================
+   AI helpers (Pollinations - free, no key)
+   ============================================================ */
+async function askAIText(prompt, max){
+  const url = "https://text.pollinations.ai/" + encodeURIComponent(prompt) + "?model=openai";
+  const res = await fetch(url);
+  if(!res.ok) throw new Error("ai");
+  let t = (await res.text()).trim().replace(/^["\u201c\u201d']+|["\u201c\u201d']+$/g, "");
+  if(max && t.length > max) t = t.slice(0, max);
+  return t;
+}
 async function askAIList(prompt){
-  const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+"?model=openai";
-  const res=await fetch(url); if(!res.ok) throw new Error("ai");
-  let t=(await res.text()).trim();
-  return t.split("\n").map(l=>l.replace(/^[\s\-\*\d\.\)]+/,"").replace(/^["\u201c\u201d']+|["\u201c\u201d']+$/g,"").trim()).filter(l=>l.length>3 && l.length<120).slice(0,5);
+  const raw = await askAIText(prompt, 1400);
+  return raw.split("\n")
+    .map(l => l.replace(/^[\s\-\*\d\.\)]+/, "").replace(/^["\u201c\u201d']+|["\u201c\u201d']+$/g, "").trim())
+    .filter(l => l.length > 3 && l.length < 120)
+    .slice(0, 6);
 }
 
-const CATS={ date:{label:"Date",emoji:"\uD83C\uDF77",color:"#e85d75"}, travel:{label:"Travel",emoji:"\u2708\uFE0F",color:"#3aa6b9"},
-  food:{label:"Food",emoji:"\uD83C\uDF5C",color:"#e8983a"}, cozy:{label:"Cozy",emoji:"\uD83C\uDFE1",color:"#9b6dd1"},
-  adventure:{label:"Adventure",emoji:"\uD83C\uDFD4\uFE0F",color:"#5aa85a"} };
-const CAT_KEYS=Object.keys(CATS);
-const STARTERS=[{t:"Cook a new recipe together",c:"food"},{t:"Watch the sunrise",c:"adventure"},
-  {t:"Weekend road trip, no plan",c:"travel"},{t:"Build a blanket fort movie night",c:"cozy"},
-  {t:"Try that restaurant we keep talking about",c:"date"}];
+/* ============================================================
+   Data model
+   ============================================================ */
+const CATS = {
+  date:      { label: "Date",      emoji: "\uD83C\uDF77", color: "#e85d75" },
+  travel:    { label: "Travel",    emoji: "\u2708\uFE0F", color: "#3aa6b9" },
+  food:      { label: "Food",      emoji: "\uD83C\uDF5C", color: "#e8983a" },
+  cozy:      { label: "Cozy",      emoji: "\uD83C\uDFE1", color: "#9b6dd1" },
+  adventure: { label: "Adventure", emoji: "\uD83C\uDFD4\uFE0F", color: "#5aa85a" },
+  milestone: { label: "Milestone", emoji: "\uD83D\uDC8D", color: "#d4a73a" }
+};
+const CAT_KEYS = Object.keys(CATS);
+const STARTERS = [
+  { t: "Cook a new recipe together", c: "food", p: 2 },
+  { t: "Watch the sunrise somewhere quiet", c: "adventure", p: 3 },
+  { t: "Weekend road trip, no plan", c: "travel", p: 3 },
+  { t: "Build a blanket fort movie night", c: "cozy", p: 1 },
+  { t: "Try that restaurant we keep talking about", c: "date", p: 2 }
+];
 
 function encode(o){ try { return btoa(encodeURIComponent(JSON.stringify(o))); } catch(e){ return ""; } }
 function decode(s){ try { return JSON.parse(decodeURIComponent(atob(s))); } catch(e){ return null; } }
-function uid(){ return Math.random().toString(36).slice(2,8); }
+function uid(){ return Math.random().toString(36).slice(2, 8); }
+function fmtDate(d){ if(!d) return ""; try { return new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch(e){ return d; } }
 
-function Confetti({go}){
-  const pieces=useMemo(()=>Array.from({length:36},(_,i)=>({id:i,x:Math.random()*100,d:Math.random()*0.6,dur:1.6+Math.random()*1.2,c:["#e85d75","#3aa6b9","#e8983a","#9b6dd1","#5aa85a","#ffce54"][i%6],r:Math.random()*360})),[go]);
+/* ============================================================
+   Confetti
+   ============================================================ */
+function Confetti({ go }){
+  const pieces = useMemo(() => Array.from({ length: 44 }, (_, i) => ({
+    id: i, x: Math.random() * 100, d: Math.random() * 0.6, dur: 1.6 + Math.random() * 1.3,
+    c: ["#e85d75","#3aa6b9","#e8983a","#9b6dd1","#5aa85a","#ffce54","#d4a73a"][i % 7], r: Math.random() * 360
+  })), [go]);
   if(!go) return null;
-  return <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,overflow:"hidden"}}>{pieces.map(p=>(
-    <span key={p.id} style={{position:"absolute",top:-20,left:p.x+"%",width:9,height:14,background:p.c,borderRadius:2,transform:"rotate("+p.r+"deg)",animation:"confetti "+p.dur+"s ease-in "+p.d+"s forwards"}}/>))}</div>;
-}
-
-function App(){
-  const initial=useMemo(()=>{ try{ const h=window.location.hash.replace(/^#/,""); if(h){ const c=decode(h); if(c&&c.items) return c; } }catch(e){}
-    return { title:"Our Someday List", items:STARTERS.map(s=>({id:uid(),text:s.t,cat:s.c,done:false})) }; },[]);
-  const [state,setState]=useState(initial);
-  const [text,setText]=useState("");
-  const [cat,setCat]=useState("date");
-  const [filter,setFilter]=useState("all");
-  const [toast,setToast]=useState("");
-  const [celebrate,setCelebrate]=useState(false);
-  const [suggestions,setSuggestions]=useState([]);
-  const [loadingSug,setLoadingSug]=useState(false);
-  const [sugCat,setSugCat]=useState("date");
-  const firstLoad=useRef(true);
-
-  useEffect(()=>{ if(firstLoad.current){ firstLoad.current=false; return; } try{ window.history.replaceState(null,"","#"+encode(state)); }catch(e){} },[state]);
-  const flash=(m)=>{ setToast(m); setTimeout(()=>setToast(""),1600); };
-
-  const add=()=>{ if(!text.trim()) return; setState(s=>({...s,items:[{id:uid(),text:text.trim(),cat,done:false},...s.items]})); setText(""); };
-  const addText=(t,c)=>{ setState(s=>({...s,items:[{id:uid(),text:t,cat:c||"date",done:false},...s.items]})); };
-  const toggle=(id)=>{ setState(s=>{ const items=s.items.map(it=>it.id===id?{...it,done:!it.done}:it); if(items.find(it=>it.id===id).done){ setCelebrate(true); setTimeout(()=>setCelebrate(false),2200);} return {...s,items}; }); };
-  const remove=(id)=>setState(s=>({...s,items:s.items.filter(it=>it.id!==id)}));
-
-  const suggest=useCallback(async()=>{
-    setLoadingSug(true); setSuggestions([]);
-    const have=state.items.slice(0,8).map(i=>i.text).join("; ");
-    const prompt="Suggest 5 fun, specific "+CATS[sugCat].label.toLowerCase()+" ideas for a couple to do together. Avoid repeating these: "+have+". Return ONLY a plain list, one idea per line, each under 12 words, no numbering, no extra text.";
-    try{ const list=await askAIList(prompt); setSuggestions(list.length?list:fallbackSug(sugCat)); }
-    catch(e){ setSuggestions(fallbackSug(sugCat)); }
-    finally{ setLoadingSug(false); }
-  },[state,sugCat]);
-
-  function fallbackSug(c){
-    const f={ date:["Stargazing with a picnic blanket","Recreate your first date","Sunset walk somewhere new","Couples' pottery class","Slow dance in the kitchen"],
-      travel:["Spontaneous overnight getaway","Visit a town neither has seen","Beach day at dawn","Train trip with no fixed plan","Camp under the stars"],
-      food:["Make pasta from scratch","Street-food crawl across the city","Bake bread together","Cook each other's childhood dish","Blind taste-test snacks"],
-      cozy:["Build a pillow fort cinema","Read to each other in bed","Puzzle and hot chocolate night","Repaint a room together","Lazy Sunday with no phones"],
-      adventure:["Sunrise hike to a viewpoint","Try kayaking together","Learn to surf","Cycle a new trail","Climb something and picnic at the top"] };
-    return f[c]||f.date;
-  }
-
-  const shareUrl=useMemo(()=>{ try{ return window.location.origin+window.location.pathname+"#"+encode(state); }catch(e){ return ""; } },[state]);
-  const copy=useCallback(async()=>{ try{ await navigator.clipboard.writeText(shareUrl); flash("Link copied \u2713 send it to them"); }catch(e){ flash("Long-press the address bar to copy"); } },[shareUrl]);
-
-  const done=state.items.filter(i=>i.done).length, total=state.items.length, pct=total?Math.round(done/total*100):0;
-  const visible=state.items.filter(i=>filter==="all"?true:filter==="done"?i.done:i.cat===filter);
-
-  const wrap={minHeight:"100vh",background:"radial-gradient(900px 500px at 50% -8%, #ffe9d6 0%, #fcf6f0 55%)",color:"#3a2a24",fontFamily:"'Nunito',sans-serif",padding:"clamp(18px,4vw,40px) 16px",display:"flex",justifyContent:"center"};
-  const serif={fontFamily:"'Fraunces',serif"};
-
   return (
-    <div style={wrap}><Confetti go={celebrate}/>
-      <div style={{width:"100%",maxWidth:560}}>
-        <div style={{textAlign:"center",marginBottom:20,animation:"fadeUp .4s ease"}}>
-          <div style={{fontSize:34}}>{"\uD83E\uDED9"}</div>
-          <h1 style={Object.assign({},serif,{margin:"4px 0 2px",fontSize:30,fontWeight:600})}>{state.title}</h1>
-          <p style={{margin:0,opacity:0.6,fontSize:14}}>Things we'll do together, someday soon.</p>
-        </div>
-
-        <div style={{background:"#fff",borderRadius:20,padding:"16px 18px",boxShadow:"0 8px 24px rgba(180,120,90,0.12)",marginBottom:18}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <span style={{fontWeight:700,fontSize:15}}>{done} of {total} done</span>
-            <span style={{fontWeight:800,fontSize:15,color:"#e85d75"}}>{pct}%</span>
-          </div>
-          <div style={{height:10,borderRadius:6,background:"#f0e3da",overflow:"hidden"}}>
-            <div style={{height:"100%",width:pct+"%",borderRadius:6,background:"linear-gradient(90deg,#ff9a76,#e85d75)",transition:"width .5s ease"}}/>
-          </div>
-        </div>
-
-        <div style={{background:"#fff",borderRadius:20,padding:"16px",boxShadow:"0 8px 24px rgba(180,120,90,0.12)",marginBottom:16}}>
-          <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} placeholder="Add an idea..." style={{width:"100%",border:"none",outline:"none",fontSize:16,padding:"6px 4px 12px",borderBottom:"1px solid #f0e3da",marginBottom:12,background:"transparent"}}/>
-          <div style={{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center"}}>
-            {CAT_KEYS.map(k=>(<button key={k} onClick={()=>setCat(k)} style={{padding:"7px 12px",borderRadius:16,fontSize:13,fontWeight:700,border:cat===k?"2px solid "+CATS[k].color:"2px solid #f0e3da",background:cat===k?CATS[k].color+"1a":"#fff",color:cat===k?CATS[k].color:"#9b8a80",cursor:"pointer"}}>{CATS[k].emoji} {CATS[k].label}</button>))}
-            <button onClick={add} style={{marginLeft:"auto",padding:"9px 18px",borderRadius:16,border:"none",background:"#e85d75",color:"#fff",fontWeight:800,fontSize:14}}>Add</button>
-          </div>
-        </div>
-
-        {/* AI suggestions */}
-        <div style={{background:"linear-gradient(135deg,#fff,#fff6ef)",borderRadius:20,padding:"16px 18px",boxShadow:"0 8px 24px rgba(180,120,90,0.12)",marginBottom:18,border:"1px solid #f6e7da"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-            <span style={{fontWeight:800,fontSize:15}}>{"\u2728"} Need ideas?</span>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {CAT_KEYS.map(k=>(<button key={k} onClick={()=>setSugCat(k)} style={{padding:"5px 10px",borderRadius:14,fontSize:12,fontWeight:700,border:sugCat===k?"2px solid "+CATS[k].color:"1px solid #ece0d6",background:sugCat===k?CATS[k].color+"1a":"#fff",color:sugCat===k?CATS[k].color:"#9b8a80",cursor:"pointer"}}>{CATS[k].emoji}</button>))}
-            </div>
-          </div>
-          <button onClick={suggest} disabled={loadingSug} style={{marginTop:12,width:"100%",padding:"11px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ff9a76,#e85d75)",color:"#fff",fontWeight:800,fontSize:14,opacity:loadingSug?0.6:1}}>{loadingSug?"Thinking...":"Suggest "+CATS[sugCat].label.toLowerCase()+" ideas"}</button>
-          {loadingSug && <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>{[1,2,3].map(i=><div key={i} className="skeleton" style={{height:38,borderRadius:12}}/>)}</div>}
-          {!loadingSug && suggestions.length>0 && (
-            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
-              {suggestions.map((s,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"#fff",borderRadius:12,padding:"10px 12px",border:"1px solid #f0e3da",animation:"slideIn .3s ease "+(i*0.05)+"s both"}}>
-                  <span style={{flex:1,fontSize:14,fontWeight:600}}>{s}</span>
-                  <button onClick={()=>{ addText(s,sugCat); setSuggestions(p=>p.filter((_,idx)=>idx!==i)); flash("Added \u2713"); }} style={{padding:"6px 12px",borderRadius:12,border:"none",background:CATS[sugCat].color,color:"#fff",fontWeight:800,fontSize:13}}>+ Add</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
-          {["all",...CAT_KEYS,"done"].map(k=>{ const isCat=CATS[k]; const label=k==="all"?"All":k==="done"?"\u2713 Done":(isCat?isCat.emoji+" "+isCat.label:k); const on=filter===k;
-            return <button key={k} onClick={()=>setFilter(k)} style={{padding:"7px 13px",borderRadius:16,fontSize:13,fontWeight:700,cursor:"pointer",border:"1px solid "+(on?"#3a2a24":"#e6d6cc"),background:on?"#3a2a24":"transparent",color:on?"#fff":"#9b8a80"}}>{label}</button>; })}
-        </div>
-
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {visible.length===0 && <div style={{textAlign:"center",opacity:0.5,padding:"30px 0",fontSize:15}}>Nothing here yet, add your first idea above.</div>}
-          {visible.map(it=>{ const c=CATS[it.cat]||CATS.date; return (
-            <div key={it.id} className="row" style={{display:"flex",alignItems:"center",gap:12,background:it.done?"rgba(255,255,255,0.55)":"#fff",borderRadius:16,padding:"14px 16px",boxShadow:"0 4px 14px rgba(180,120,90,0.08)",borderLeft:"4px solid "+c.color,transition:"background .2s ease"}}>
-              <button onClick={()=>toggle(it.id)} aria-label="toggle" style={{width:26,height:26,borderRadius:"50%",border:it.done?"none":"2px solid "+c.color,background:it.done?c.color:"transparent",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{it.done && <span style={{animation:"checkPop .3s ease"}}>{"\u2713"}</span>}</button>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:16,fontWeight:600,textDecoration:it.done?"line-through":"none",opacity:it.done?0.5:1}}>{it.text}</div>
-                <div style={{fontSize:12,opacity:0.55,marginTop:2}}>{c.emoji} {c.label}</div>
-              </div>
-              <button onClick={()=>remove(it.id)} aria-label="remove" style={{background:"none",border:"none",color:"#c9b3a8",fontSize:18,cursor:"pointer",flexShrink:0}}>{"\u00d7"}</button>
-            </div>
-          ); })}
-        </div>
-
-        <div style={{display:"flex",gap:10,justifyContent:"center",marginTop:22,flexWrap:"wrap"}}>
-          <button onClick={copy} style={{padding:"11px 20px",borderRadius:20,border:"none",background:"#3a2a24",color:"#fff",fontWeight:700,fontSize:14}}>Copy & share list</button>
-        </div>
-        <p style={{textAlign:"center",fontSize:12,opacity:0.5,marginTop:14,lineHeight:1.5}}>Your list saves into the link automatically. Copy it, send it to them, and you'll both see the same list.</p>
-      </div>
-      {toast && <div style={{position:"fixed",top:22,left:"50%",transform:"translateX(-50%)",background:"rgba(58,42,36,0.92)",color:"#fff",padding:"10px 20px",borderRadius:20,fontSize:14,fontWeight:600,zIndex:60}}>{toast}</div>}
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 50, overflow: "hidden" }}>
+      {pieces.map(p => (
+        <span key={p.id} style={{
+          position: "absolute", top: -20, left: p.x + "%", width: 9, height: 14, background: p.c,
+          borderRadius: 2, transform: "rotate(" + p.r + "deg)",
+          animation: "confetti " + p.dur + "s ease-in " + p.d + "s forwards"
+        }} />
+      ))}
     </div>
   );
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+
+/* ============================================================
+   Completion ring
+   ============================================================ */
+function Ring({ pct }){
+  const r = 52, circ = 2 * Math.PI * r;
+  const off = circ - (pct / 100) * circ;
+  return (
+    <svg width="128" height="128" viewBox="0 0 128 128">
+      <circle cx="64" cy="64" r={r} fill="none" stroke="#f0e3da" strokeWidth="12" />
+      <circle cx="64" cy="64" r={r} fill="none" stroke="url(#g)" strokeWidth="12" strokeLinecap="round"
+        strokeDasharray={circ} strokeDashoffset={off} transform="rotate(-90 64 64)"
+        style={{ transition: "stroke-dashoffset .6s ease" }} />
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ff9a76" />
+          <stop offset="1" stopColor="#e85d75" />
+        </linearGradient>
+      </defs>
+      <text x="64" y="60" textAnchor="middle" fontSize="28" fontWeight="800" fill="#3a2a24" fontFamily="Nunito">{pct}%</text>
+      <text x="64" y="80" textAnchor="middle" fontSize="12" fill="#9b8a80" fontFamily="Nunito">done</text>
+    </svg>
+  );
+}
+
+/* ============================================================
+   Shared bits
+   ============================================================ */
+const serif = { fontFamily: "'Fraunces',serif" };
+function Toast({ msg }){
+  return <div style={{ position: "fixed", top: 22, left: "50%", transform: "translateX(-50%)", background: "rgba(58,42,36,0.92)", color: "#fff", padding: "10px 20px", borderRadius: 20, fontSize: 14, fontWeight: 600, zIndex: 90 }}>{msg}</div>;
+}
+function Hearts({ level, onSet, size }){
+  return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {[1, 2, 3].map(n => (
+        <span key={n} onClick={onSet ? (e) => { e.stopPropagation(); onSet(n); } : undefined}
+          style={{ fontSize: size || 16, cursor: onSet ? "pointer" : "default", color: n <= level ? "#e85d75" : "#e6d0c8" }}>
+          {n <= level ? "\u2665" : "\u2661"}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/* ============================================================
+   Detail / planner modal
+   ============================================================ */
+function DetailModal({ item, onClose, onSave, onPlan, planText, planning }){
+  const [text, setText] = useState(item.text);
+  const [cat, setCat] = useState(item.cat);
+  const [pri, setPri] = useState(item.p || 2);
+  const [note, setNote] = useState(item.note || "");
+  const [date, setDate] = useState(item.date || "");
+  const c = CATS[cat] || CATS.date;
+  const inp = { width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #ece0d6", fontSize: 15, outline: "none", marginBottom: 14, background: "#fff" };
+  const lbl = { display: "block", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, color: "#9b8a80", margin: "0 0 7px" };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(58,42,36,0.45)", zIndex: 80, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 0 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 520, background: "#fcf6f0", borderRadius: "24px 24px 0 0", padding: "24px", maxHeight: "92vh", overflowY: "auto", animation: "modalIn .3s ease", borderTop: "5px solid " + c.color }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: "#e6d0c8", margin: "0 auto 18px" }} />
+        <h2 style={Object.assign({}, serif, { margin: "0 0 16px", fontSize: 22, fontWeight: 600 })}>Edit idea</h2>
+
+        <label style={lbl}>What is it?</label>
+        <input style={inp} value={text} onChange={e => setText(e.target.value)} />
+
+        <label style={lbl}>Category</label>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>
+          {CAT_KEYS.map(k => (
+            <button key={k} onClick={() => setCat(k)} style={{ padding: "7px 12px", borderRadius: 14, fontSize: 13, fontWeight: 700, border: cat === k ? "2px solid " + CATS[k].color : "1px solid #ece0d6", background: cat === k ? CATS[k].color + "1a" : "#fff", color: cat === k ? CATS[k].color : "#9b8a80" }}>{CATS[k].emoji} {CATS[k].label}</button>
+          ))}
+        </div>
+
+        <label style={lbl}>How excited are you?</label>
+        <div style={{ marginBottom: 16 }}><Hearts level={pri} onSet={setPri} size={26} /></div>
+
+        <label style={lbl}>Target date (optional)</label>
+        <input style={inp} type="date" value={date} onChange={e => setDate(e.target.value)} />
+
+        <label style={lbl}>Notes (optional)</label>
+        <textarea style={{ ...inp, minHeight: 70, resize: "vertical" }} value={note} onChange={e => setNote(e.target.value)} placeholder="Where, who books it, ideas..." />
+
+        {/* AI planner */}
+        <div style={{ background: "#fff6ef", border: "1px solid #f6e7da", borderRadius: 16, padding: "14px 16px", marginBottom: 18 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8 }}>{"\u2728"} Let AI plan this</div>
+          {planning ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="skeleton" style={{ height: 12, borderRadius: 6, width: "90%" }} />
+              <div className="skeleton" style={{ height: 12, borderRadius: 6, width: "80%" }} />
+              <div className="skeleton" style={{ height: 12, borderRadius: 6, width: "60%" }} />
+            </div>
+          ) : planText ? (
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{planText}</p>
+          ) : (
+            <p style={{ margin: 0, fontSize: 13, opacity: 0.7 }}>Get a little step-by-step plan to make "{text}" actually happen.</p>
+          )}
+          <button onClick={() => onPlan(text)} disabled={planning} style={{ marginTop: 10, padding: "9px 14px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#ff9a76,#e85d75)", color: "#fff", fontWeight: 800, fontSize: 13, opacity: planning ? 0.6 : 1 }}>{planText ? "Re-plan" : "Plan it"} {"\u2728"}</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "13px", borderRadius: 14, border: "1px solid #e6d0c8", background: "#fff", color: "#9b8a80", fontWeight: 700, fontSize: 15 }}>Cancel</button>
+          <button onClick={() => onSave({ ...item, text: text.trim() || item.text, cat, p: pri, note, date })} style={{ flex: 2, padding: "13px", borderRadius: 14, border: "none", background: "#e85d75", color: "#fff", fontWeight: 800, fontSize: 15 }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Main app
+   ============================================================ */
+function App(){
+  const initial = useMemo(() => {
+    try { const h = window.location.hash.replace(/^#/, ""); if(h){ const c = decode(h); if(c && c.items) return c; } } catch(e){}
+    return { title: "Our Someday List", items: STARTERS.map(s => ({ id: uid(), text: s.t, cat: s.c, p: s.p, done: false, note: "", date: "", doneAt: null })) };
+  }, []);
+
+  const [state, setState] = useState(initial);
+  const [text, setText] = useState("");
+  const [cat, setCat] = useState("date");
+  const [pri, setPri] = useState(2);
+  const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState("added");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("list");      // list | stats
+  const [toast, setToast] = useState("");
+  const [celebrate, setCelebrate] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [planText, setPlanText] = useState("");
+  const [planning, setPlanning] = useState(false);
+
+  // AI suggestions
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSug, setLoadingSug] = useState(false);
+  const [sugCat, setSugCat] = useState("date");
+  const [surprise, setSurprise] = useState("");
+  const [loadingSurprise, setLoadingSurprise] = useState(false);
+
+  const firstLoad = useRef(true);
+  useEffect(() => {
+    if(firstLoad.current){ firstLoad.current = false; return; }
+    try { window.history.replaceState(null, "", "#" + encode(state)); } catch(e){}
+  }, [state]);
+
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 1600); };
+
+  const add = () => {
+    if(!text.trim()) return;
+    setState(s => ({ ...s, items: [{ id: uid(), text: text.trim(), cat, p: pri, done: false, note: "", date: "", doneAt: null }, ...s.items] }));
+    setText(""); setPri(2);
+  };
+  const addText = (t, c, p) => setState(s => ({ ...s, items: [{ id: uid(), text: t, cat: c || "date", p: p || 2, done: false, note: "", date: "", doneAt: null }, ...s.items] }));
+  const toggle = (id) => {
+    setState(s => {
+      const items = s.items.map(it => it.id === id ? { ...it, done: !it.done, doneAt: !it.done ? Date.now() : null } : it);
+      if(items.find(it => it.id === id).done){ setCelebrate(true); setTimeout(() => setCelebrate(false), 2400); }
+      return { ...s, items };
+    });
+  };
+  const remove = (id) => setState(s => ({ ...s, items: s.items.filter(it => it.id !== id) }));
+  const saveEdit = (updated) => { setState(s => ({ ...s, items: s.items.map(it => it.id === updated.id ? updated : it) })); setEditing(null); setPlanText(""); };
+
+  /* AI: suggestions */
+  const suggest = useCallback(async () => {
+    setLoadingSug(true); setSuggestions([]);
+    const have = state.items.slice(0, 8).map(i => i.text).join("; ");
+    const prompt = "Suggest 5 fun, specific " + CATS[sugCat].label.toLowerCase() + " ideas for a couple to do together. Avoid repeating these: " + have + ". Return ONLY a plain list, one idea per line, each under 12 words, no numbering.";
+    try { const list = await askAIList(prompt); setSuggestions(list.length ? list : fb(sugCat)); }
+    catch(e){ setSuggestions(fb(sugCat)); }
+    finally { setLoadingSug(false); }
+  }, [state, sugCat]);
+  function fb(c){
+    const f = {
+      date: ["Stargazing with a picnic blanket","Recreate your very first date","Sunset walk somewhere new","Couples' pottery class","Slow dance in the kitchen"],
+      travel: ["Spontaneous overnight getaway","Visit a town neither has seen","Beach day at dawn","Take a train with no fixed plan","Camp under the stars"],
+      food: ["Make fresh pasta from scratch","Street-food crawl across the city","Bake bread together","Cook each other's childhood dish","Blind taste-test snacks"],
+      cozy: ["Build a pillow-fort cinema","Read to each other in bed","Puzzle and hot chocolate night","Repaint a room together","Phone-free lazy Sunday"],
+      adventure: ["Sunrise hike to a viewpoint","Try kayaking together","Take a surfing lesson","Cycle a brand-new trail","Climb something and picnic up top"],
+      milestone: ["Plan our dream trip on a map","Start a shared savings jar","Make a five-year vision board","Plant a tree together","Write letters to open in a year"]
+    };
+    return f[c] || f.date;
+  }
+
+  /* AI: surprise date */
+  const getSurprise = useCallback(async () => {
+    setLoadingSurprise(true); setSurprise("");
+    const prompt = "Invent ONE delightful, specific surprise date idea for a couple, with a tiny reason why it's special. Two sentences max, no preamble, no quotes.";
+    try { const t = await askAIText(prompt, 240); setSurprise(t); }
+    catch(e){ setSurprise("Plan a 'yes day' where you both say yes to every small suggestion for a few hours. It turns an ordinary afternoon into a string of tiny adventures."); }
+    finally { setLoadingSurprise(false); }
+  }, []);
+
+  /* AI: plan a specific item */
+  const planItem = useCallback(async (itemText) => {
+    setPlanning(true); setPlanText("");
+    const prompt = "Give a short, practical 3-step plan to actually make this date idea happen for a couple: '" + itemText + "'. Keep each step to one line, warm and doable. No preamble.";
+    try { const t = await askAIText(prompt, 400); setPlanText(t); }
+    catch(e){ setPlanText("1. Pick a date this month and put it in both calendars.\n2. Sort the one thing it needs (booking, tickets, or supplies).\n3. Keep it simple, the point is the time together, not perfection."); }
+    finally { setPlanning(false); }
+  }, []);
+
+  const shareUrl = useMemo(() => { try { return window.location.origin + window.location.pathname + "#" + encode(state); } catch(e){ return ""; } }, [state]);
+  const copy = useCallback(async () => { try { await navigator.clipboard.writeText(shareUrl); flash("Link copied \u2713 send it to them"); } catch(e){ flash("Long-press the address bar to copy"); } }, [shareUrl]);
+
+  /* derived */
+  const done = state.items.filter(i => i.done).length;
+  const total = state.items.length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+
+  const perCat = useMemo(() => {
+    const m = {};
+    CAT_KEYS.forEach(k => m[k] = { total: 0, done: 0 });
+    state.items.forEach(i => { if(!m[i.cat]) m[i.cat] = { total: 0, done: 0 }; m[i.cat].total++; if(i.done) m[i.cat].done++; });
+    return m;
+  }, [state]);
+
+  const completedLog = useMemo(() => state.items.filter(i => i.done && i.doneAt).sort((a, b) => b.doneAt - a.doneAt), [state]);
+
+  const visible = useMemo(() => {
+    let list = state.items.filter(i => filter === "all" ? true : filter === "done" ? i.done : filter === "todo" ? !i.done : i.cat === filter);
+    if(search.trim()){ const q = search.toLowerCase(); list = list.filter(i => i.text.toLowerCase().includes(q) || (i.note || "").toLowerCase().includes(q)); }
+    if(sort === "excited") list = [...list].sort((a, b) => (b.p || 0) - (a.p || 0));
+    else if(sort === "date") list = [...list].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+    else if(sort === "cat") list = [...list].sort((a, b) => a.cat.localeCompare(b.cat));
+    return list;
+  }, [state, filter, search, sort]);
+
+  /* styles */
+  const wrap = { minHeight: "100vh", background: "radial-gradient(900px 500px at 50% -8%, #ffe9d6 0%, #fcf6f0 55%)", color: "#3a2a24", fontFamily: "'Nunito',sans-serif", padding: "clamp(18px,4vw,40px) 16px", display: "flex", justifyContent: "center" };
+  const cardW = { background: "#fff", borderRadius: 20, padding: "16px 18px", boxShadow: "0 8px 24px rgba(180,120,90,0.12)", marginBottom: 18 };
+  const tabBtn = (key, label) => (
+    <button onClick={() => setTab(key)} style={{ flex: 1, padding: "11px", borderRadius: 14, border: "none", fontSize: 14, fontWeight: 800, background: tab === key ? "#3a2a24" : "transparent", color: tab === key ? "#fff" : "#9b8a80" }}>{label}</button>
+  );
+
+  return (
+    <div style={wrap}>
+      <Confetti go={celebrate} />
+      <div style={{ width: "100%", maxWidth: 580 }}>
+        <div style={{ textAlign: "center", marginBottom: 18, animation: "fadeUp .4s ease" }}>
+          <div style={{ fontSize: 34 }}>{"\uD83E\uDED9"}</div>
+          <h1 style={Object.assign({}, serif, { margin: "4px 0 2px", fontSize: 30, fontWeight: 600 })}>{state.title}</h1>
+          <p style={{ margin: 0, opacity: 0.6, fontSize: 14 }}>Things we'll do together, someday soon.</p>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, background: "#fff", borderRadius: 16, padding: 5, marginBottom: 18, boxShadow: "0 8px 24px rgba(180,120,90,0.1)" }}>
+          {tabBtn("list", "The list")}
+          {tabBtn("stats", "Our stats")}
+        </div>
+
+        {/* ===================== LIST TAB ===================== */}
+        {tab === "list" && (
+          <>
+            {/* progress mini */}
+            <div style={cardW}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontWeight: 800, fontSize: 15 }}>{done} of {total} done</span>
+                <span style={{ fontWeight: 800, fontSize: 15, color: "#e85d75" }}>{pct}%</span>
+              </div>
+              <div style={{ height: 10, borderRadius: 6, background: "#f0e3da", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: pct + "%", borderRadius: 6, background: "linear-gradient(90deg,#ff9a76,#e85d75)", transition: "width .5s ease" }} />
+              </div>
+            </div>
+
+            {/* add */}
+            <div style={cardW}>
+              <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} placeholder="Add an idea..." style={{ width: "100%", border: "none", outline: "none", fontSize: 16, padding: "6px 4px 12px", borderBottom: "1px solid #f0e3da", marginBottom: 12, background: "transparent" }} />
+              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
+                {CAT_KEYS.map(k => (
+                  <button key={k} onClick={() => setCat(k)} style={{ padding: "7px 12px", borderRadius: 16, fontSize: 13, fontWeight: 700, border: cat === k ? "2px solid " + CATS[k].color : "2px solid #f0e3da", background: cat === k ? CATS[k].color + "1a" : "#fff", color: cat === k ? CATS[k].color : "#9b8a80" }}>{CATS[k].emoji} {CATS[k].label}</button>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: "#9b8a80", fontWeight: 700 }}>Excited:</span>
+                  <Hearts level={pri} onSet={setPri} size={20} />
+                </div>
+                <button onClick={add} style={{ padding: "9px 20px", borderRadius: 16, border: "none", background: "#e85d75", color: "#fff", fontWeight: 800, fontSize: 14 }}>Add</button>
+              </div>
+            </div>
+
+            {/* AI suggestions */}
+            <div style={{ ...cardW, background: "linear-gradient(135deg,#fff,#fff6ef)", border: "1px solid #f6e7da" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                <span style={{ fontWeight: 800, fontSize: 15 }}>{"\u2728"} Need ideas?</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {CAT_KEYS.map(k => (
+                    <button key={k} onClick={() => setSugCat(k)} style={{ padding: "5px 10px", borderRadius: 14, fontSize: 13, fontWeight: 700, border: sugCat === k ? "2px solid " + CATS[k].color : "1px solid #ece0d6", background: sugCat === k ? CATS[k].color + "1a" : "#fff", color: sugCat === k ? CATS[k].color : "#9b8a80" }}>{CATS[k].emoji}</button>
+                  ))}
+                </div>
+              </div>
+              <button onClick={suggest} disabled={loadingSug} style={{ marginTop: 12, width: "100%", padding: "11px", borderRadius: 14, border: "none", background: "linear-gradient(135deg,#ff9a76,#e85d75)", color: "#fff", fontWeight: 800, fontSize: 14, opacity: loadingSug ? 0.6 : 1 }}>{loadingSug ? "Thinking..." : "Suggest " + CATS[sugCat].label.toLowerCase() + " ideas"}</button>
+              {loadingSug && <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>{[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 38, borderRadius: 12 }} />)}</div>}
+              {!loadingSug && suggestions.length > 0 && (
+                <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {suggestions.map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", borderRadius: 12, padding: "10px 12px", border: "1px solid #f0e3da", animation: "slideIn .3s ease " + (i * 0.05) + "s both" }}>
+                      <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{s}</span>
+                      <button onClick={() => { addText(s, sugCat, 2); setSuggestions(p => p.filter((_, idx) => idx !== i)); flash("Added \u2713"); }} style={{ padding: "6px 12px", borderRadius: 12, border: "none", background: CATS[sugCat].color, color: "#fff", fontWeight: 800, fontSize: 13 }}>+ Add</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* AI surprise */}
+            <div style={{ ...cardW, background: "linear-gradient(135deg,#fff0f3,#f3ecff)", border: "1px solid #f3dce6" }}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>{"\uD83C\uDF81"} Surprise us</div>
+              {loadingSurprise ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div className="skeleton" style={{ height: 12, borderRadius: 6, width: "92%" }} />
+                  <div className="skeleton" style={{ height: 12, borderRadius: 6, width: "70%" }} />
+                </div>
+              ) : surprise ? (
+                <p style={Object.assign({}, serif, { margin: "4px 0 10px", fontSize: 17, lineHeight: 1.5 })}>{surprise}</p>
+              ) : (
+                <p style={{ margin: "0 0 10px", fontSize: 13, opacity: 0.7 }}>Let AI dream up a one-off surprise date for you two.</p>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={getSurprise} disabled={loadingSurprise} style={{ padding: "9px 16px", borderRadius: 14, border: "none", background: "#b06bff", color: "#fff", fontWeight: 800, fontSize: 13, opacity: loadingSurprise ? 0.6 : 1 }}>{surprise ? "Another" : "Surprise me"} {"\u2728"}</button>
+                {surprise && <button onClick={() => { addText(surprise.split(".")[0], "date", 3); flash("Added to list \u2713"); }} style={{ padding: "9px 16px", borderRadius: 14, border: "1px solid #e6d0c8", background: "#fff", color: "#9b6dd1", fontWeight: 800, fontSize: 13 }}>+ Add it</button>}
+              </div>
+            </div>
+
+            {/* search + sort */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ideas..." style={{ flex: 1, minWidth: 140, padding: "10px 14px", borderRadius: 14, border: "1px solid #ece0d6", fontSize: 14, outline: "none", background: "#fff" }} />
+              <select value={sort} onChange={e => setSort(e.target.value)} style={{ padding: "10px 12px", borderRadius: 14, border: "1px solid #ece0d6", fontSize: 14, background: "#fff", color: "#3a2a24" }}>
+                <option value="added">Newest</option>
+                <option value="excited">Most excited</option>
+                <option value="date">By date</option>
+                <option value="cat">By category</option>
+              </select>
+            </div>
+
+            {/* filters */}
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
+              {["all", "todo", ...CAT_KEYS, "done"].map(k => {
+                const isCat = CATS[k];
+                const label = k === "all" ? "All" : k === "todo" ? "To do" : k === "done" ? "\u2713 Done" : (isCat ? isCat.emoji + " " + isCat.label : k);
+                const on = filter === k;
+                return <button key={k} onClick={() => setFilter(k)} style={{ padding: "7px 13px", borderRadius: 16, fontSize: 13, fontWeight: 700, cursor: "pointer", border: "1px solid " + (on ? "#3a2a24" : "#e6d6cc"), background: on ? "#3a2a24" : "transparent", color: on ? "#fff" : "#9b8a80" }}>{label}</button>;
+              })}
+            </div>
+
+            {/* the list */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {visible.length === 0 && <div style={{ textAlign: "center", opacity: 0.5, padding: "30px 0", fontSize: 15 }}>Nothing here yet, add an idea above.</div>}
+              {visible.map(it => {
+                const c = CATS[it.cat] || CATS.date;
+                return (
+                  <div key={it.id} className="row" onClick={() => { setEditing(it); setPlanText(""); }} style={{ display: "flex", alignItems: "center", gap: 12, background: it.done ? "rgba(255,255,255,0.55)" : "#fff", borderRadius: 16, padding: "14px 16px", boxShadow: "0 4px 14px rgba(180,120,90,0.08)", borderLeft: "4px solid " + c.color, transition: "background .2s ease", cursor: "pointer" }}>
+                    <button onClick={(e) => { e.stopPropagation(); toggle(it.id); }} aria-label="toggle" style={{ width: 26, height: 26, borderRadius: "50%", border: it.done ? "none" : "2px solid " + c.color, background: it.done ? c.color : "transparent", color: "#fff", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{it.done && <span style={{ animation: "checkPop .3s ease" }}>{"\u2713"}</span>}</button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.5 : 1 }}>{it.text}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, opacity: 0.55 }}>{c.emoji} {c.label}</span>
+                        <Hearts level={it.p || 0} size={13} />
+                        {it.date && <span style={{ fontSize: 12, opacity: 0.55 }}>{"\uD83D\uDCC5"} {fmtDate(it.date)}</span>}
+                        {it.note && <span style={{ fontSize: 12, opacity: 0.55 }}>{"\uD83D\uDCDD"}</span>}
+                      </div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); remove(it.id); }} aria-label="remove" style={{ background: "none", border: "none", color: "#c9b3a8", fontSize: 18, cursor: "pointer", flexShrink: 0 }}>{"\u00d7"}</button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* ===================== STATS TAB ===================== */}
+        {tab === "stats" && (
+          <>
+            <div style={{ ...cardW, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
+              <Ring pct={pct} />
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 28, fontWeight: 800 }}>{done}<span style={{ opacity: 0.4, fontSize: 18 }}> / {total}</span></div>
+                <div style={{ opacity: 0.6, fontSize: 14, marginBottom: 8 }}>adventures completed</div>
+                <div style={{ fontSize: 14, color: "#e85d75", fontWeight: 700 }}>{total - done} still to go {"\uD83D\uDC9E"}</div>
+              </div>
+            </div>
+
+            <div style={cardW}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 14 }}>By category</div>
+              {CAT_KEYS.map(k => {
+                const m = perCat[k]; const t = m.total; const d = m.done; const p = t ? Math.round(d / t * 100) : 0;
+                return (
+                  <div key={k} style={{ marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+                      <span style={{ fontWeight: 700 }}>{CATS[k].emoji} {CATS[k].label}</span>
+                      <span style={{ opacity: 0.6 }}>{d}/{t}</span>
+                    </div>
+                    <div style={{ height: 8, borderRadius: 4, background: "#f0e3da", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: p + "%", borderRadius: 4, background: CATS[k].color, transition: "width .5s ease" }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={cardW}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12 }}>{"\uD83C\uDF89"} Memories made</div>
+              {completedLog.length === 0 ? (
+                <p style={{ opacity: 0.6, fontSize: 14, margin: 0 }}>Check things off and they'll appear here, your shared highlight reel.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {completedLog.map(it => {
+                    const c = CATS[it.cat] || CATS.date;
+                    return (
+                      <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "#fbf3ec", borderRadius: 12, padding: "11px 14px", borderLeft: "4px solid " + c.color }}>
+                        <span style={{ fontSize: 18 }}>{c.emoji}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 15, fontWeight: 600 }}>{it.text}</div>
+                          <div style={{ fontSize: 12, opacity: 0.55 }}>{new Date(it.doneAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</div>
+                        </div>
+                        <span style={{ color: c.color, fontSize: 18 }}>{"\u2713"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* footer */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}>
+          <button onClick={copy} style={{ padding: "11px 20px", borderRadius: 20, border: "none", background: "#3a2a24", color: "#fff", fontWeight: 700, fontSize: 14 }}>Copy &amp; share list</button>
+        </div>
+        <p style={{ textAlign: "center", fontSize: 12, opacity: 0.5, marginTop: 14, lineHeight: 1.5 }}>Your whole list, notes and progress save into the link automatically. Copy it, send it, and you'll both see the same list.</p>
+      </div>
+
+      {editing && <DetailModal item={editing} onClose={() => { setEditing(null); setPlanText(""); }} onSave={saveEdit} onPlan={planItem} planText={planText} planning={planning} />}
+      {toast && <Toast msg={toast} />}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
