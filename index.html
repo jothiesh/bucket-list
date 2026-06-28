@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Our Someday List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; padding:0; min-height:100%; }
+  body { background:#fcf6f0; }
+  #root { min-height:100vh; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes checkPop { 0%{transform:scale(.5);opacity:0} 60%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
+  @keyframes confetti { to { transform: translateY(120vh) rotate(720deg); opacity:0; } }
+  @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+  @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+  button { font-family:inherit; transition:transform .15s ease, background .2s ease, box-shadow .2s ease; cursor:pointer; }
+  button:active { transform:scale(0.96); }
+  input { font-family:inherit; }
+  input::placeholder { color: rgba(0,0,0,0.3); }
+  .row:hover { background: rgba(255,255,255,0.95) !important; }
+  .skeleton { background:linear-gradient(90deg,#f0e3da 25%,#f7eee7 37%,#f0e3da 63%); background-size:200% 100%; animation:shimmer 1.4s infinite; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+async function askAIList(prompt){
+  const url="https://text.pollinations.ai/"+encodeURIComponent(prompt)+"?model=openai";
+  const res=await fetch(url); if(!res.ok) throw new Error("ai");
+  let t=(await res.text()).trim();
+  return t.split("\n").map(l=>l.replace(/^[\s\-\*\d\.\)]+/,"").replace(/^["\u201c\u201d']+|["\u201c\u201d']+$/g,"").trim()).filter(l=>l.length>3 && l.length<120).slice(0,5);
+}
+
+const CATS={ date:{label:"Date",emoji:"\uD83C\uDF77",color:"#e85d75"}, travel:{label:"Travel",emoji:"\u2708\uFE0F",color:"#3aa6b9"},
+  food:{label:"Food",emoji:"\uD83C\uDF5C",color:"#e8983a"}, cozy:{label:"Cozy",emoji:"\uD83C\uDFE1",color:"#9b6dd1"},
+  adventure:{label:"Adventure",emoji:"\uD83C\uDFD4\uFE0F",color:"#5aa85a"} };
+const CAT_KEYS=Object.keys(CATS);
+const STARTERS=[{t:"Cook a new recipe together",c:"food"},{t:"Watch the sunrise",c:"adventure"},
+  {t:"Weekend road trip, no plan",c:"travel"},{t:"Build a blanket fort movie night",c:"cozy"},
+  {t:"Try that restaurant we keep talking about",c:"date"}];
+
+function encode(o){ try { return btoa(encodeURIComponent(JSON.stringify(o))); } catch(e){ return ""; } }
+function decode(s){ try { return JSON.parse(decodeURIComponent(atob(s))); } catch(e){ return null; } }
+function uid(){ return Math.random().toString(36).slice(2,8); }
+
+function Confetti({go}){
+  const pieces=useMemo(()=>Array.from({length:36},(_,i)=>({id:i,x:Math.random()*100,d:Math.random()*0.6,dur:1.6+Math.random()*1.2,c:["#e85d75","#3aa6b9","#e8983a","#9b6dd1","#5aa85a","#ffce54"][i%6],r:Math.random()*360})),[go]);
+  if(!go) return null;
+  return <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,overflow:"hidden"}}>{pieces.map(p=>(
+    <span key={p.id} style={{position:"absolute",top:-20,left:p.x+"%",width:9,height:14,background:p.c,borderRadius:2,transform:"rotate("+p.r+"deg)",animation:"confetti "+p.dur+"s ease-in "+p.d+"s forwards"}}/>))}</div>;
+}
+
+function App(){
+  const initial=useMemo(()=>{ try{ const h=window.location.hash.replace(/^#/,""); if(h){ const c=decode(h); if(c&&c.items) return c; } }catch(e){}
+    return { title:"Our Someday List", items:STARTERS.map(s=>({id:uid(),text:s.t,cat:s.c,done:false})) }; },[]);
+  const [state,setState]=useState(initial);
+  const [text,setText]=useState("");
+  const [cat,setCat]=useState("date");
+  const [filter,setFilter]=useState("all");
+  const [toast,setToast]=useState("");
+  const [celebrate,setCelebrate]=useState(false);
+  const [suggestions,setSuggestions]=useState([]);
+  const [loadingSug,setLoadingSug]=useState(false);
+  const [sugCat,setSugCat]=useState("date");
+  const firstLoad=useRef(true);
+
+  useEffect(()=>{ if(firstLoad.current){ firstLoad.current=false; return; } try{ window.history.replaceState(null,"","#"+encode(state)); }catch(e){} },[state]);
+  const flash=(m)=>{ setToast(m); setTimeout(()=>setToast(""),1600); };
+
+  const add=()=>{ if(!text.trim()) return; setState(s=>({...s,items:[{id:uid(),text:text.trim(),cat,done:false},...s.items]})); setText(""); };
+  const addText=(t,c)=>{ setState(s=>({...s,items:[{id:uid(),text:t,cat:c||"date",done:false},...s.items]})); };
+  const toggle=(id)=>{ setState(s=>{ const items=s.items.map(it=>it.id===id?{...it,done:!it.done}:it); if(items.find(it=>it.id===id).done){ setCelebrate(true); setTimeout(()=>setCelebrate(false),2200);} return {...s,items}; }); };
+  const remove=(id)=>setState(s=>({...s,items:s.items.filter(it=>it.id!==id)}));
+
+  const suggest=useCallback(async()=>{
+    setLoadingSug(true); setSuggestions([]);
+    const have=state.items.slice(0,8).map(i=>i.text).join("; ");
+    const prompt="Suggest 5 fun, specific "+CATS[sugCat].label.toLowerCase()+" ideas for a couple to do together. Avoid repeating these: "+have+". Return ONLY a plain list, one idea per line, each under 12 words, no numbering, no extra text.";
+    try{ const list=await askAIList(prompt); setSuggestions(list.length?list:fallbackSug(sugCat)); }
+    catch(e){ setSuggestions(fallbackSug(sugCat)); }
+    finally{ setLoadingSug(false); }
+  },[state,sugCat]);
+
+  function fallbackSug(c){
+    const f={ date:["Stargazing with a picnic blanket","Recreate your first date","Sunset walk somewhere new","Couples' pottery class","Slow dance in the kitchen"],
+      travel:["Spontaneous overnight getaway","Visit a town neither has seen","Beach day at dawn","Train trip with no fixed plan","Camp under the stars"],
+      food:["Make pasta from scratch","Street-food crawl across the city","Bake bread together","Cook each other's childhood dish","Blind taste-test snacks"],
+      cozy:["Build a pillow fort cinema","Read to each other in bed","Puzzle and hot chocolate night","Repaint a room together","Lazy Sunday with no phones"],
+      adventure:["Sunrise hike to a viewpoint","Try kayaking together","Learn to surf","Cycle a new trail","Climb something and picnic at the top"] };
+    return f[c]||f.date;
+  }
+
+  const shareUrl=useMemo(()=>{ try{ return window.location.origin+window.location.pathname+"#"+encode(state); }catch(e){ return ""; } },[state]);
+  const copy=useCallback(async()=>{ try{ await navigator.clipboard.writeText(shareUrl); flash("Link copied \u2713 send it to them"); }catch(e){ flash("Long-press the address bar to copy"); } },[shareUrl]);
+
+  const done=state.items.filter(i=>i.done).length, total=state.items.length, pct=total?Math.round(done/total*100):0;
+  const visible=state.items.filter(i=>filter==="all"?true:filter==="done"?i.done:i.cat===filter);
+
+  const wrap={minHeight:"100vh",background:"radial-gradient(900px 500px at 50% -8%, #ffe9d6 0%, #fcf6f0 55%)",color:"#3a2a24",fontFamily:"'Nunito',sans-serif",padding:"clamp(18px,4vw,40px) 16px",display:"flex",justifyContent:"center"};
+  const serif={fontFamily:"'Fraunces',serif"};
+
+  return (
+    <div style={wrap}><Confetti go={celebrate}/>
+      <div style={{width:"100%",maxWidth:560}}>
+        <div style={{textAlign:"center",marginBottom:20,animation:"fadeUp .4s ease"}}>
+          <div style={{fontSize:34}}>{"\uD83E\uDED9"}</div>
+          <h1 style={Object.assign({},serif,{margin:"4px 0 2px",fontSize:30,fontWeight:600})}>{state.title}</h1>
+          <p style={{margin:0,opacity:0.6,fontSize:14}}>Things we'll do together, someday soon.</p>
+        </div>
+
+        <div style={{background:"#fff",borderRadius:20,padding:"16px 18px",boxShadow:"0 8px 24px rgba(180,120,90,0.12)",marginBottom:18}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{fontWeight:700,fontSize:15}}>{done} of {total} done</span>
+            <span style={{fontWeight:800,fontSize:15,color:"#e85d75"}}>{pct}%</span>
+          </div>
+          <div style={{height:10,borderRadius:6,background:"#f0e3da",overflow:"hidden"}}>
+            <div style={{height:"100%",width:pct+"%",borderRadius:6,background:"linear-gradient(90deg,#ff9a76,#e85d75)",transition:"width .5s ease"}}/>
+          </div>
+        </div>
+
+        <div style={{background:"#fff",borderRadius:20,padding:"16px",boxShadow:"0 8px 24px rgba(180,120,90,0.12)",marginBottom:16}}>
+          <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} placeholder="Add an idea..." style={{width:"100%",border:"none",outline:"none",fontSize:16,padding:"6px 4px 12px",borderBottom:"1px solid #f0e3da",marginBottom:12,background:"transparent"}}/>
+          <div style={{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center"}}>
+            {CAT_KEYS.map(k=>(<button key={k} onClick={()=>setCat(k)} style={{padding:"7px 12px",borderRadius:16,fontSize:13,fontWeight:700,border:cat===k?"2px solid "+CATS[k].color:"2px solid #f0e3da",background:cat===k?CATS[k].color+"1a":"#fff",color:cat===k?CATS[k].color:"#9b8a80",cursor:"pointer"}}>{CATS[k].emoji} {CATS[k].label}</button>))}
+            <button onClick={add} style={{marginLeft:"auto",padding:"9px 18px",borderRadius:16,border:"none",background:"#e85d75",color:"#fff",fontWeight:800,fontSize:14}}>Add</button>
+          </div>
+        </div>
+
+        {/* AI suggestions */}
+        <div style={{background:"linear-gradient(135deg,#fff,#fff6ef)",borderRadius:20,padding:"16px 18px",boxShadow:"0 8px 24px rgba(180,120,90,0.12)",marginBottom:18,border:"1px solid #f6e7da"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <span style={{fontWeight:800,fontSize:15}}>{"\u2728"} Need ideas?</span>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {CAT_KEYS.map(k=>(<button key={k} onClick={()=>setSugCat(k)} style={{padding:"5px 10px",borderRadius:14,fontSize:12,fontWeight:700,border:sugCat===k?"2px solid "+CATS[k].color:"1px solid #ece0d6",background:sugCat===k?CATS[k].color+"1a":"#fff",color:sugCat===k?CATS[k].color:"#9b8a80",cursor:"pointer"}}>{CATS[k].emoji}</button>))}
+            </div>
+          </div>
+          <button onClick={suggest} disabled={loadingSug} style={{marginTop:12,width:"100%",padding:"11px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ff9a76,#e85d75)",color:"#fff",fontWeight:800,fontSize:14,opacity:loadingSug?0.6:1}}>{loadingSug?"Thinking...":"Suggest "+CATS[sugCat].label.toLowerCase()+" ideas"}</button>
+          {loadingSug && <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>{[1,2,3].map(i=><div key={i} className="skeleton" style={{height:38,borderRadius:12}}/>)}</div>}
+          {!loadingSug && suggestions.length>0 && (
+            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+              {suggestions.map((s,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"#fff",borderRadius:12,padding:"10px 12px",border:"1px solid #f0e3da",animation:"slideIn .3s ease "+(i*0.05)+"s both"}}>
+                  <span style={{flex:1,fontSize:14,fontWeight:600}}>{s}</span>
+                  <button onClick={()=>{ addText(s,sugCat); setSuggestions(p=>p.filter((_,idx)=>idx!==i)); flash("Added \u2713"); }} style={{padding:"6px 12px",borderRadius:12,border:"none",background:CATS[sugCat].color,color:"#fff",fontWeight:800,fontSize:13}}>+ Add</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
+          {["all",...CAT_KEYS,"done"].map(k=>{ const isCat=CATS[k]; const label=k==="all"?"All":k==="done"?"\u2713 Done":(isCat?isCat.emoji+" "+isCat.label:k); const on=filter===k;
+            return <button key={k} onClick={()=>setFilter(k)} style={{padding:"7px 13px",borderRadius:16,fontSize:13,fontWeight:700,cursor:"pointer",border:"1px solid "+(on?"#3a2a24":"#e6d6cc"),background:on?"#3a2a24":"transparent",color:on?"#fff":"#9b8a80"}}>{label}</button>; })}
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {visible.length===0 && <div style={{textAlign:"center",opacity:0.5,padding:"30px 0",fontSize:15}}>Nothing here yet, add your first idea above.</div>}
+          {visible.map(it=>{ const c=CATS[it.cat]||CATS.date; return (
+            <div key={it.id} className="row" style={{display:"flex",alignItems:"center",gap:12,background:it.done?"rgba(255,255,255,0.55)":"#fff",borderRadius:16,padding:"14px 16px",boxShadow:"0 4px 14px rgba(180,120,90,0.08)",borderLeft:"4px solid "+c.color,transition:"background .2s ease"}}>
+              <button onClick={()=>toggle(it.id)} aria-label="toggle" style={{width:26,height:26,borderRadius:"50%",border:it.done?"none":"2px solid "+c.color,background:it.done?c.color:"transparent",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{it.done && <span style={{animation:"checkPop .3s ease"}}>{"\u2713"}</span>}</button>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:16,fontWeight:600,textDecoration:it.done?"line-through":"none",opacity:it.done?0.5:1}}>{it.text}</div>
+                <div style={{fontSize:12,opacity:0.55,marginTop:2}}>{c.emoji} {c.label}</div>
+              </div>
+              <button onClick={()=>remove(it.id)} aria-label="remove" style={{background:"none",border:"none",color:"#c9b3a8",fontSize:18,cursor:"pointer",flexShrink:0}}>{"\u00d7"}</button>
+            </div>
+          ); })}
+        </div>
+
+        <div style={{display:"flex",gap:10,justifyContent:"center",marginTop:22,flexWrap:"wrap"}}>
+          <button onClick={copy} style={{padding:"11px 20px",borderRadius:20,border:"none",background:"#3a2a24",color:"#fff",fontWeight:700,fontSize:14}}>Copy & share list</button>
+        </div>
+        <p style={{textAlign:"center",fontSize:12,opacity:0.5,marginTop:14,lineHeight:1.5}}>Your list saves into the link automatically. Copy it, send it to them, and you'll both see the same list.</p>
+      </div>
+      {toast && <div style={{position:"fixed",top:22,left:"50%",transform:"translateX(-50%)",background:"rgba(58,42,36,0.92)",color:"#fff",padding:"10px 20px",borderRadius:20,fontSize:14,fontWeight:600,zIndex:60}}>{toast}</div>}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
